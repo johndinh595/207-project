@@ -1,0 +1,570 @@
+---
+title: "Effects of Public Gathering Restrictions on COVID-19 Case Fatality Rate"
+author: 'Team 10: John Dinh'
+output:
+  html_document: 
+    toc: true
+    theme: united
+    
+
+date: '2022-03-04'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Abstract
+
+In order to fight the combat the spread of COVID-19 countries around the world have implemented varying degrees of social distancing measures. There are multiple papers assessing the impact of these measures in combination with other non-pharmaceutical interventions (NPIs) such as economic policies and public health education, but the study the relative effectiveness of solely social distancing measures has not been an area heavily invested in. The model chosen deemed the effects of social distancing to have no significant effects on mitigating the spread of COVID and the case fatality rate. This was due to more of a model error rather since it has been shown before that the combination of social distancing and other NPI's have been proven effective in reducing the spread of COVID-19. In addition, the data at hand is observational data, which will be difficult to model and asses casuality, although some alternatives will be discussed. 
+
+# Introduction
+
+Coronavirus disease 2019, aptly named COVID-19, is a respiratory virus in the a larger family of more general coronaviruses. COVID-19 is caused by a SARS-CoV-2, a virus that was first discovered in Wuhan, China in late 2019. Since then, the virus has been known to be extremely contagious and has spread across the globe, raging on for the better part of the last two and a half years. The virus that causes COVID-19, SARS-CoV-2, is a part of a family of coronaviruses, which include viruses that cause severe diseases such as severe acute respiratory syndrome (SARS), Middle East respiratory syndrome (MERS), as well as other types of more mild respiratory illnesses.
+
+In 2020 alone, COVID-19 has ravaged through countries in Southeast Asia. In October of 2020, countries in this region have reported more than 850,000 cases and more than 21,000 deaths. Numbers in the Southeast Asian region are also vastly underestimated due to the nature of the medical systems in these developing countries. The responses in these countries are varied. More developed countries such as Singapore and Vietnam have incorporated much stricter government policies in order to curb the virus, and other countries such Myanmar and Laos have taken a more informal stance strict government policies (Djalante et al.).
+
+The importance of analyzing these developing countries is important in order to further study the impact that COVID-19 has left on their people, economies, and well being. Prior to COVID-19, Southeast Asia was ranked highly among with respects to development, industrialization, and urbanization (2019). The drawback to this was there was now a much more unbalanced access to resources and socioeconomic inequalities within these countries (Douglass et al.), which led to economic instability, thereby increasing health risks all around. An overwhelming majority of workers in this region are constituents of the informal economy, and due social mobility needed to perform labor in large sectors such tourism, wholesale trade, transportation, and food service, were left scrambling for economic stability once the pandemic took its course (2021). Local governments of these countries face increasing pressure to re-stabilize the economy in order for its citizens to continue living similarly prior to COVID-19.
+
+In this complex region, government feedback has been a mixed bag. Leadership in the Philippines and Malaysia have been criticized for the lack transparency and overabundance of political red-tape, while in countries such Vietnam, leadership has been upfront and extensive on public health communications (Amul et al.). These differences lead to wildly different responses and dynamically affects the trajectory of controlling the virus. In addition to non-pharmaceutical interventions (NPIs), policies around vaccines in each country has been different. Some countries are still relying on vaccine makers such as China, USA, and the European union, while other countries in the region, such as Thailand, Indonesia, and Vietnam are still in the development phases of their vaccines (Dinh et al.).
+
+Outside of pharmaceutical interventions, certain public health measures can be implemented in order to mitigate the spread of COVID-19. These NPIs have their respective relative efficacies and it is critical to be able to quantify the degree of which they flatten the curve and reduce disease burden. A few of these NPIs include the implementation of containment guidelines, economic policies, and public health systems. By studying the relative effects of social distancing policies and their effectiveness, local governments can make more data driven decisions. A prior word of warning, studying individual NPIs poses moderate methodological challenges due to the strong assumptions each scenario constitutes. To slightly alleviate this, countries with similar geographical location and timing of interventions will be studied.
+
+# Data
+
+The main data set that was used in this analysis is obtained from the World Health Organization. The supplementary data set, titled 'COVID-19 Government Response Tracker(OxCGRT),' was provided by the University of Oxford. The WHO data set provided daily and cumulative counts for confirmed COVID cases and deaths. The daily infection rate will be estimated using this data set and further methodologies will be discussed below. The OxCGRT data set provided the social distancing measures, which are categorical variables that represent the strictness of government mandated containment policies. Policies were recorded daily on an ordinal scale as follows:
+
+-   0 - no measures
+-   1 - restrictions on very large gatherings (the limit is above 1000 people)
+-   2 - restrictions on gatherings between 101-1000 people
+-   3 - restrictions on gatherings between 11-100 people
+-   4 - restrictions on gatherings of 10 people or less
+-   Blank - no data
+
+# Objective
+
+The primary objective of this report is to investigate the impact of public gatherings on case fatality rate for Thailand, Myanmar, Bangladesh, and Nepal. The variability of the the case fatality rate is solely not determined from whether or not a country has public gatherings, but an adjusted estimated of this metric can be used to further assess the impact of this policy.
+
+# Descriptive Analysis
+
+A high level overview of the data was performed. The WHO data set contains daily records about a country's region (defined by WHO), cases, cumulative cases, deaths, and cumulative deaths. In the figures below, the severity of cases and deaths can be seen. Although the data set is updated everyday, the time period taken for this report will be between January 1st, 2020 to Feburary 17th, 2022.
+
+```{r, Libraries, message = F, warning = F, echo = F}
+library(tidyverse)
+library(plotly)
+library(countrycode)
+library(tibbletime)
+library(knitr)
+library(vistime)
+library(Hmisc)
+library(vtable)
+library(ggplot2)
+library(ggthemes)
+library(lme4)
+library(lattice)
+library(jtools)
+library(viridis)
+library(ggridges)
+library(gplots)
+library(gridExtra)
+library(longCatEDA)
+pacman::p_load(
+  moderndive,
+  MASS,
+  glmm,
+  nortest,
+  naniar,
+  rio,         
+  here,         
+  skimr,        
+  tidyverse,    
+  gtsummary,    
+  rstatix,      
+  janitor,       
+  scales,        
+  flextable      
+  )
+```
+
+```{r,  message = F, echo = F}
+covid <- read_csv('https://covid19.who.int/WHO-COVID-19-global-data.csv')
+
+covid <- covid %>% add_column(CountryCode = countrycode(covid$Country_code, 'iso2c', 'iso3c')) %>% 
+  relocate(CountryCode, .after = Country_code)  %>%  
+  rename(Date = Date_reported, CountryName = Country) %>% group_by(CountryCode) 
+
+covid <- as_tbl_time(covid, index = Date)
+
+#Gatherings Data  
+oxford_gatherings <- read.csv('/Users/johndinh/207-project/covid-policy-tracker/data/timeseries/c4_restrictions_on_gatherings.csv')
+oxford_gatherings <- gather(oxford_gatherings, Date, Restrictions, X01Jan2020:X23Feb2022)
+oxford_gatherings$Date <- as.Date(oxford_gatherings$Date, format ='X%d%b%Y')
+oxford_gatherings <- oxford_gatherings %>% 
+  relocate(Date, .before = country_code) %>% 
+  group_by(country_code) %>% 
+  arrange(Date, .by_group = T) %>% 
+  rename(CountryCode = country_code, CountryName = country_name)
+oxford_gatherings <- as_tbl_time(oxford_gatherings, index = Date)
+
+#Cancellation of Public Events
+oxford_publicevents <- read.csv('/Users/johndinh/207-project/covid-policy-tracker/data/timeseries/c3_cancel_public_events.csv')
+oxford_publicevents <- gather(oxford_publicevents, Date, PublicEvents, X01Jan2020:X23Feb2022)
+oxford_publicevents$Date <- as.Date(oxford_publicevents$Date, format ='X%d%b%Y')
+oxford_publicevents <- oxford_publicevents %>% 
+  relocate(Date, .before = country_code) %>% 
+  group_by(country_code) %>% 
+  arrange(Date, .by_group = T) %>% 
+  rename(CountryCode = country_code, CountryName = country_name)
+oxford_publicevents <- as_tbl_time(oxford_publicevents, index = Date)
+
+#Combining Public Events Data and Gaterings Data 
+combined <- oxford_gatherings %>% 
+  left_join(oxford_publicevents, by = c('Date','CountryCode')) 
+
+#Merging Covid and policy datasets 
+clean <- left_join(combined, covid, by = c('Date' = 'Date', 'CountryCode' = 'CountryCode')) %>% 
+  group_by(CountryCode) %>% drop_na() %>% 
+  relocate(WHO_region, .before = CountryCode)
+
+clean <- clean %>% dplyr::select(-X.x, -X.y, -CountryName.y, -CountryName.x, -Country_code)
+
+clean <- clean %>% relocate(CountryName, .before = WHO_region)
+clean <- clean %>% relocate(WHO_region, .before = CountryName)
+#clean %>% select_if(is.numeric)  %>%  skim()
+```
+
+```{r, echo = F, message = F, warning = F, GlobalMmap, fig.align = 'center'}
+map <- covid %>% filter(Date == '2022-02-17')
+
+#setting boundaries as light grey 
+line <- list(color = toRGB('#d1d1d1'), width = .2)
+
+## Specifing parameters of the 3D map
+ geo <- list(
+    showframe = T,
+    showcoastlines = FALSE,
+    projection = list(type = 'natural earth'),
+    resolution = '300',
+    showcountries = TRUE,
+    countrycolor = '#d1d1d1',
+    showocean = TRUE,
+    oceancolor = '#064273',
+    showlakes = T,
+    lakecolor = '#99c0db',
+    showrivers = T,
+    rivercolor = '#99c0db',
+    bgcolor = '#e8f7fc')
+
+plot_geo() %>%
+  layout(geo = geo,
+         paper_bgcolor = '#e8f7fc',
+         title = paste0("COVID-19 Cumulative Cases by Country by ", '2022-02-17')) %>%
+  add_trace(data = map,
+            z = ~Cumulative_cases,
+            colors = "Reds",
+            text = ~'Country/Region',
+            locations = ~CountryCode,
+            marker = list(line = line))
+```
+
+```{r, echo = F, warning = FALSE, message = FALSE, fig.align = 'center'}
+
+series <- create_series('2020-01-03'~ '2022-02-17', period = 'w') #weekly time series object
+series <- as.Date(series$date) #converting dttm to date object 
+p <- clean %>% filter(Date %in% series) %>% group_by(Date) %>% summarise(Total_deaths = sum(Cumulative_deaths), Total_cases = sum(Cumulative_cases))
+
+
+plot_ly(data = p, x = ~Date, y = ~Total_cases, type = 'bar', name = 'Cases') %>% 
+  add_trace(y = ~Total_deaths, name = 'Deaths') %>% 
+  layout(barmode = 'stack', 
+         title = 'Weekly Global Case & Death Count to 2022-02-17',
+         yaxis = list(title = 'Total Count'),
+         xaxis = list(title = 'Date'))
+```
+
+Comparative to the case count, the fatality rate of the disease is quite small. The South East Asian region also does relatively well with respect to this metric. Although out of the scope of this analysis, a possibility for this is due to the lack of development in this region in comparison to more economically developed nations such the United States of America and China.
+
+```{r, echo = F, warning = F, message = F, fig.align = 'center'}
+b <- covid %>% filter(Date == '2022-02-17') %>% group_by(WHO_region) %>%  summarise(Cumulative_cases = sum(Cumulative_cases), Cumulative_deaths = sum(Cumulative_deaths), CFR =  round(100*sum(Cumulative_deaths)/sum(Cumulative_cases),3), Recovery_rate = 100-CFR) 
+
+plot_ly(data = b, x = ~reorder(WHO_region,CFR),
+        y = ~CFR, type = 'bar', 
+        colors = '#377EB8',
+        name = 'Case Fatality Rate',
+        orientation = 'v') %>%
+  layout(yaxis = list(title = 'CFR (%)'),
+         xaxis = list(title ='Region'
+                      )
+         
+         )
+```
+
+From the figure below, the South East Asian region had a strong initial spike early April 2020 when COVID-19 started, and decreased until late 2021. At this time, different strains of the coronavirus became more prominent as well as restlessness from the pandemic, both fueling the spike in case fatality rate for the second half of 2021 and coming into 2022. After the spike in late 2021, the case fatality rate is slowly decreasing, as seen in the figure.
+
+```{r, echo = F,  warning = F, message = F}
+
+c <- covid %>% filter(WHO_region == 'SEARO') %>% group_by(Date) %>% mutate(CFR = round(100*(Cumulative_deaths/Cumulative_cases),3),Recovery_rate = 100-CFR) %>% filter(CFR!=0)
+monthly <- create_series('2020-01-03'~ '2022-02-17', period = 'monthly')
+monthly <- as.Date(monthly$date)
+cp <- plot_ly(data = c, 
+        x = ~Date,
+        y = ~CFR, 
+        type = 'scatter',
+        mode = 'lines',
+        name = 'SouthEast Asian Region: Case Fatality Rate'
+        ) %>% 
+  add_trace(y = ~Recovery_rate, name = 'South East Asian Region: Recovery Rate') %>% 
+  layout(title ='SEARO Region: CFR vs Recovery Rate', legend = list(orientation = 'h', font =list(size =7)),
+                                                                   xaxis = list(title = 'Date Reported'),
+                                                                   yaxis = list(title = 'Percentage (%)'))
+```
+
+## Metrics
+
+Since the objective want to measure how effective restrictions on public gatherings are, a reasonable metric to calculate is the infection rate of the virus. In order to estimate this metric, a key point of data is the infectious population, which is not in the WHO data set. Therefore, a few assumptions will be made to calculate the this population. Since COVID is asymptomatic, the biggest assumption made in the construction of this metric is that infectiousness is assumed to be during the duration of viral shedding.
+
+The daily infection rate was estimated by first estimating the daily current infected population. An individual is considered part of the infectious population until the period of viral shedding is over (Badu et al.), which is on average is considered to be 17 days (Cevik et al.). Therefore, the estimate of the current daily number of infected is the difference between the number of current cumulative cases and the number of cumulative cases 17 days ago.
+
+$$P_{currentInfected} = Cases_{t, cumulative}- Cases_{t-17, cumulative} $$
+
+Next, to estimate the daily change in infected population percentage, the ratio of the current infected population over yesterday's current infected population was used.
+
+$$\Delta_{Daily, infected} = \frac{P_{t}}{P_{t-1}}*100 $$
+
+Finally, to estimate the daily infectious rate, the following methods of estimation were used (Espinosa et al.), which is a function of the previous day's change in infection rate:
+
+$$ R_{D} = (1 -\Delta_{Daily, infected})*100 $$
+
+```{r Creating Response Variable, echo = F}
+
+#Containgon Rate/Infection Rate Estimation Source: https://www.frontiersin.org/articles/10.3389/fams.2020.571544/full#e1
+#Since we want to measure how effective the social distancing policies are, we will try to calculate the contagion rate  as our response variable
+#We need the number of infected time 2/number of infected at time 1
+#to find the number of infected on a given day: current day - 17th day ago(viral shedding paper) (under the assumption that people quaratine after they find out they are infectious by positive test)
+
+
+
+clean <- clean %>% mutate(CFR = Cumulative_deaths/Hmisc::Lag(Cumulative_cases, 7),
+                          LagCFR = Cumulative_deaths/Hmisc::Lag(Cumulative_cases, 7), 
+                          Current_infected = Cumulative_cases - Hmisc::Lag(Cumulative_cases, 17),
+                          LagNewCases = Hmisc::Lag(New_cases, 7),
+                          LagCumCases = Hmisc::Lag(Cumulative_cases, 7),
+                          Daily_change_infected = Current_infected/Hmisc::Lag(Current_infected,1),
+                          contagion_rate_daily = 100*abs(1-Daily_change_infected))
+
+```
+
+With generalizing assumptions, the change in daily infectious rate can be used to measure how well a country is doing during the pandemic on a day to day basis. The following table shows the max change in daily infectious rates for each of the WHO defined regions. Despite the South East Asian region having varied NPIs, primarily informal economies, , the region has the smallest daily change in infection rates.
+
+```{r, echo = F, message = F}
+kable(clean %>%  group_by(WHO_region) %>% filter(is.finite(contagion_rate_daily)) %>% select_if(is.numeric) %>% 
+  summarise(MaxIR = max(contagion_rate_daily)) %>% arrange(desc(MaxIR))) %>% kable_styling(position = 'center')
+```
+
+Another angle is to look at the trend of daily new cases in each of the regions. The plot shows a 7 day average of daily new cases in each of the WHO regions. One of the reasons for the surge in cases in the second half of 2021 for South East Asia was due to the different variants arising at the time (Chookajorn et al.). Therefore, this region would be an interesting region to analyze.
+
+```{r, message = F, warning = F, echo = F, fig.align = 'center'}
+avg_cases_whoplot <- 
+  clean %>% 
+  ggplot(aes(x = Date, y = stats::filter(New_cases, rep(1/7, 7)), 
+             group = WHO_region, color = WHO_region)) +
+  geom_line() + 
+  facet_wrap(~WHO_region)+
+  scale_y_continuous(labels = comma) +
+  scale_colour_brewer(palette = 'Set1', 
+                      labels = c('African Region','Region of the Americas',
+                                 'Eastern Mediterranean Region','European Region',
+                                 'South-East Asian Region','Western Pacific Region'),
+                      name = 'Region') +
+  ggtitle(label = 'Weekly Average of New Cases by WHO Region') +
+  ylab('Average Number of Cases') +
+  theme_solarized()+
+  theme(legend.text = element_text(size =7.5),
+        axis.text.x =element_text(angle = (90)),
+        legend.position = 'bottom') +
+  scale_x_date(date_labels = '%Y-%m',
+               date_breaks = '6 month')
+
+avg_cases_whoplot
+
+
+```
+
+A closer look at the countries in the South East Asian region can provide more insight about which countries to analyze. The case fatality rate of Nepal and Thailand stayed relatively flat, despite having relatively large populations. Timor-Leste would have been another interesting point of analysis but its population is only 1.3 million. In a similar vein, Indian's population is too large at 1.3 billion. Nepal, Bangladesh, Myanmar, and Thailand were chosen as countries of interest due to their similar trends in case fatality rate and relative location to each other.
+
+The date of interest is the second half of 2021, during which the South East Asian region struggled the most with with respect to daily cases. The max case fatality rate of these countries can also be calculated during this time frame for a better understanding of the countries of analysis. Both Thailand and Nepal have relatively low case fatality rates and low max fatality rates relative to other countries in the region as well.
+
+```{r, echo = F, warning = F, fig.align='center'}
+temp <- clean %>% filter(WHO_region == 'SEARO') %>% mutate(CFR = Cumulative_deaths/Cumulative_cases)
+temp$CFR[!is.finite(temp$CFR)] <- 0
+
+
+SEA_CFRplot <- temp %>% 
+  ggplot()+
+  geom_line(aes(x = Date, y = 100*CFR, group = CountryName, color = CountryName)) +
+  facet_wrap(~CountryName)+
+   scale_y_continuous(labels = comma)+
+  scale_colour_brewer(palette = 'Paired', 
+                      name = 'Country')+
+  ggtitle(label = 'South East Asia: Changes in Case Fatality Rate') +
+  ylab('Case Fatality Rate (%)') +
+  theme_solarized()+
+  theme(legend.text = element_text(size =7.5),
+        axis.text.x =element_text(angle = (90)),
+        legend.position = 'right') +
+  scale_x_date(date_labels = '%Y-%m',
+               date_breaks = '6 month')
+
+SEA_CFRplot
+
+
+kable(clean %>% filter(WHO_region == 'SEARO' &Date >= '2021-04-01' & Date <= '2021-10-31') %>% group_by(CountryName) %>% 
+  dplyr::select(CountryName, Cumulative_cases, Cumulative_deaths) %>% 
+  summarise(MaxCFR = 100* max(Cumulative_deaths/Cumulative_cases)) %>% arrange(desc(MaxCFR))) %>% kable_styling(position = 'center')
+
+
+```
+
+Below are some summary statistics about the the variables in the WHO data set as well as the the public gathering restrictions from the OxCGRT data set. For both of these countries during this time period, the most implemented restriction for public gathering was 4, which indicates that public gatherings were limited to 10 people at most.
+
+```{r, message = F, echo = F, warning = F}
+Countries_of_interest <- c('Myanmar' ,'Bangladesh', 'Nepal','Thailand') #based on vicinity and interest of CFR trajectory
+Countries_of_interest_3 <- c('Myanmar' ,'Bangladesh', 'Nepal','Thailand') #based on vicinity and interest of CFR trajectory
+
+
+
+
+covid_countries <- clean %>% filter(CountryName %in% Countries_of_interest, Date >= '2021-04-01' & Date <= '2021-10-31')
+covid_countries_3 <- clean %>% filter(CountryName %in% Countries_of_interest_3, Date >= '2021-04-01' & Date <= '2021-10-31')
+
+#checking for missing values 
+
+library(naniar)
+getmode <- function(v) {
+   uniqv <- unique(v)
+   uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+#covid_countries %>% gg_miss_var(show_pct = T)  #No missing data, nice
+
+
+
+covid_countries_3 %>% dplyr::select(Restrictions, New_cases, Cumulative_cases, New_deaths, Cumulative_deaths, CFR, Daily_change_infected, contagion_rate_daily) %>% 
+  sumtable(out = 'kable',
+           title = 'Summary Statistics', 
+           summ = c('notNA(x)', 'getmode(x)', 'mean(x)',  'min(x)', 'pctile(x)[25]', 'median(x)', 'pctile(x)[75]', 'max(x)', 'sd(x)'),
+           summ.names = c('N','Mode', 'Mean', 'Min','Q1','Q2','Q3','Max','SD'),
+           simple.kable = T,
+           digits = 3) %>% kable_styling(position = 'center')
+
+
+```
+
+# Model Building: Linear Mixed Effects Model
+
+The model of choice will be to use a mixed effect model. The rationale of selecting this type of model is to investigate whether or not the implementation of public gathering restrictions affect is below:
+
+1.  Inclusion of fixed and random effects
+
+2.  Does not rely on independence in the data
+
+3.  Does not rely on aggregation of data to ensure homogeneity
+
+4.  Separate unit level analysis for each country is repetitive and also does not consider all the data per unit analysis.
+
+The model is as follows:
+
+$$ Y_{ijk} = \mu_{..} + \alpha_{i} + \beta_{j} + \epsilon_{ijk}$$
+
+Where:
+
+-   $Y_{ijk}$ - is case fatality rate
+-   $\mu_{..}$ - is the mean case fatality rate
+-   $\alpha_i$ - is the random effect variable for a dummy coded country $i \in$ {Nepal, Bangladesh , Myanmar , Thailand}
+-   $\beta_j$ - is the fixed effect for the level of strictness of public gathering restrictions where $j \in$ {0,1,2,3,4}.
+-   $\epsilon_{ijk}$- captures the unexplained effects on case fatality rate among all observations.
+
+```{r, echo = F, message = F, warning = F}
+
+index <- covid_countries %>% group_by(CountryName) %>% mutate(change = stats::filter(Restrictions, c(-1,1), 'convolution',
+                                                                                     circular = F, sides = 2))
+
+
+index$change <- index$change %>% replace_na(0) 
+
+index <-index %>% mutate(change = replace(change, change!=0, 1))
+
+
+indexp1 <- index %>% filter(CountryCode == 'BGD' & Date <= '2021-07-14')  %>%  mutate(Days = 0)
+indexp2 <- index %>% filter(CountryCode == 'BGD' & Date <= '2021-07-22' & Date > '2021-07-14')  %>%  mutate(Days = row_number()-1)
+indexp3 <- index %>% filter(CountryCode == 'BGD' & Date > '2021-07-22' & Date <= '2021-10-31') %>%  mutate(Days = row_number()-1)
+
+index_bgd <- rbind(indexp1, indexp2, indexp3)
+
+
+indexq1 <- index %>% filter(CountryCode == 'NPL' & Date <= '2021-04-28')  %>%  mutate(Days = row_number()-1)
+indexq2 <- index %>% filter(CountryCode == 'NPL' & Date <= '2021-05-24' & Date > '2021-04-28')  %>%  mutate(Days = row_number()-1)
+indexq3 <- index %>% filter(CountryCode == 'NPL' & Date > '2021-05-24' & Date <= '2021-07-03') %>%  mutate(Days = row_number()-1)
+indexq4 <- index %>% filter(CountryCode == 'NPL' & Date > '2021-07-03' & Date <= '2021-07-25') %>%  mutate(Days = row_number()-1)
+indexq5 <- index %>% filter(CountryCode == 'NPL' & Date > '2021-07-25' & Date <= '2021-10-04') %>%  mutate(Days = row_number()-1)
+indexq6 <- index %>% filter(CountryCode == 'NPL' & Date > '2021-10-04' & Date <= '2021-10-31') %>%  mutate(Days = row_number()-1)
+index_npl <- rbind(indexq1, indexq2, indexq3, indexq4, indexq5, indexq6)
+
+
+indexm1 <- index %>%  filter(CountryCode == 'MMR') %>% mutate(Days = row_number() -1)
+
+
+indext1 <- index %>%  filter(CountryCode == 'THA' & Date <= '2021-08-30') %>% mutate(Days = row_number() -1)
+indext2 <- index %>%  filter(CountryCode == 'THA' & Date > '2021-08-30') %>% mutate(Days = row_number() -1)
+
+index_tha <- rbind(indext1, indext2)
+
+index_days <- rbind(index_npl ,index_tha) 
+
+index_days <- index_days %>% mutate(LagCFR = 100*LagCFR)
+
+#cc_tn <- covid_countries %>% filter(CountryCode == c('THA','NPL') )
+
+#cc_tn$Days <- index_days$Days
+
+```
+
+## Feature Selection
+
+From the interaction plot below, it is depicted that there is indication that the interaction term is not statistically significant.
+
+```{r, warning = F, fig.align = 'center', message = F, echo = F}
+test <- clean %>% group_by(CountryCode) %>% filter(CountryCode %in% c('NPL', 'BGD' , 'MMR' , 'THA') & Date <= '2022-01-01' & Date > '2021-5-30') %>% select(Date, CountryName, LagCFR, Restrictions)
+
+test$CountryName <- as.factor(test$CountryName)
+test$Restrictions <- as.factor(test$Restrictions)
+
+par(mfrow = c(1,2))
+plotmeans(LagCFR ~ CountryName, data = test)
+plotmeans(LagCFR ~ Restrictions, data = test)
+interaction.plot(test$CountryName, test$Restrictions, test$LagCFR,
+                 xlab = 'CountryName',
+                 ylab = 'LagCFR')
+```
+
+We will not include the interaction term following the test below.
+
+```{r, echo = F}
+full <- lm(LagCFR ~ CountryName + Restrictions + CountryName:Restrictions, data = test)
+reduced <- lm(LagCFR ~ CountryName + Restrictions, data = test)
+anova(reduced, full)
+
+```
+
+## Model Fitting & Diagnostics
+
+### Assumptions
+
+The mixed effects model follows the following assumptions:
+
+1.  $\alpha_i \sim N(0, \sigma_a^2)$
+2.  $\beta_j \sim N(0, \sigma_b^2)$
+3.  $\epsilon_{ijk} \sim N(0, \sigma^2)$
+
+The initial plots show egregious departures from model assumptions. One assumption to ensure is that the residuals {$\epsilon_{ijk}$} $\sim N(0,\sigma^2)$. The QQ plot below does not follow this assumption.
+
+```{r, echo = F, warning = F, message = F,  fig.align = 'center'}
+
+fit <- lmer(LagCFR ~ (1|CountryName) + Restrictions  , data = test) 
+
+v <- qqmath(fit, id = .05, main = 'QQ Plot')
+b <- plot(fit, type = c('p', 'smooth'), main = 'Fitted vs Residual Plot')
+n <- plot(fit, sqrt(abs(resid(.))) ~ fitted(.), type = c('p', 'smooth'), 
+     main = 'Scale-Location Plot')
+
+v
+grid.arrange(b,n, ncol = 2, nrow =1)
+
+
+```
+
+The QQ plot shows that the distribution has heavy tails on both sides. To fix the assumption that the residuals are normally distributed, we can look towards the rank test. The idea of this test is to replace $\epsilon_{ijk}$ with $\sqrt{w_{ij}}\epsilon_{ijk}$. By using the rank test, we can replace the least squares estimator using the weighted least squares estimator. After applying weight least squares, the following we have the following diagnostic plots.
+
+```{r, echo = F}
+test$LagCFR <- rank(test$LagCFR)
+fit <- lmer(LagCFR ~ (1|CountryName) + Restrictions  , data = test)
+
+v <- qqmath(fit, id = .05, main = 'QQ Plot')
+b <- plot(fit, type = c('p', 'smooth'), main = 'Fitted vs Residual Plot')
+n <- plot(fit, sqrt(abs(resid(.))) ~ fitted(.), type = c('p', 'smooth'), 
+     main = 'Scale-Location Plot')
+v
+grid.arrange(b,n, ncol = 2, nrow =1)
+
+```
+
+
+### Predictive Power
+There are other methods of assessing the model however. One method is using posterior predictive probability using Bayesian methods (Bates et al.). In this method, the summary statistic chosen for simulation data is the interquartile range of the case fatality rate. We then calculate the probability that this simulated data follows the simulated distribution from our fitted model. The posterior predictive p value of .32 indicates that the model does not explain the data very well. 
+
+```{r}
+set.seed(253215)
+i <- sapply(simulate(fit, 1000), IQR)
+obsval <- IQR(test$LagCFR)
+post_predictive_prob <- mean(obsval <= c(obsval, i))
+post_predictive_prob
+```
+
+# Results & Discussion
+
+```{r}
+summ(fit)
+```
+
+All of the predictors are not significant. Since Restrictions are not significant, we can conclude that strictness of public gathering restrictions did not have a statistically significant effect on the case fatality rate. Granted, case fatality rate is grossly overestimated and contains a fair amount of lag in it which the restriction of public gathering may not sufficiently explain.
+
+In order to perform causal inference, a counter-factual needs to be constructed. There is literature on simulating values for a counter-factual but the scope of that idea is out of reach for this project. An example of this would be to simulate the values of the number of daily cases/deaths if a policy was/was not to be implemented (Babino et. al). This would allow the question of interest and model to be framed in the potential outcomes framework, and therefore, proceed with causal inference. New time series methods have also been recently developed in order to analyze such a scenario. Interrupted time series is a quasi-experimental method that is relatively new that is used to model the effect of the implementation of a policy/intervention. This method has been used to examine the effect of public lock down effect on the case rate of COVID in India (Tetali et al.)
+
+
+Another scope is that since the question is concerned with the implementation of a policy understanding the causal effect of this policy is to design a randomized controlled trial experiment such that the separation of the effect from the confounding factors can be accurately quantifiable. Realistically, performing this experiment in the real world in the midst of a pandemic is not feasible. 
+
+# Conclusion & Future Works 
+
+Retrospectively, the relationship between the question of interest and the response variable did not make much sense. Accounting for the lag from reported COVID cases to COVID deaths and quantifying that relationship to try to model the effects of limiting public gatherings required additional tweaking.
+
+On the bright side, as the pandemic moves on and there is more data about changes in government restrictions and increases/decreases in cases, a more accurate and better approach to modeling this effect may be feasible. As mentioned before, an interrupted time series model may be a good course of action in order to model the sole effects of singular NPI's on COVID metrics.  Although the approach taken in this report was not deemed significant, prior research has shown that a combinations of NPI's,  including limiting social gatherings, have been shown to be effective in mitigating the transmission of COVID (Ayouni et al.). It is important that the general public is aware of this research and its statistically significance in order to curb the pandemic and allow these countries to return to their pre-pandemic golden days. 
+
+
+# References
+
+A crisis waiting to happen: Unemployment and informality in Southeast Asia during COVID. The Rockefeller Foundation. (2021, July 21). Retrieved March 4, 2022, from <https://www.rockefellerfoundation.org/blog/a-crisis-waiting-to-happen-unemployment-and-informality-in-southeast-asia-during-covid/>
+
+Amul, G. G., Ang, M., Kraybill, D., Ong, S. E., & Yoong, J. (2021, August 11). Responses to Covid‐19 in Southeast Asia: Diverse paths and ongoing challenges. Asian Economic Policy Review. Retrieved March 4, 2022, from <https://www.ncbi.nlm.nih.gov/pmc/articles/PMC8441835>
+
+Ayouni, I., Maatoug, J., Dhouib, W. et al. Effective public health measures to mitigate the spread of COVID-19: a systematic review. BMC Public Health 21, 1015 (2021). https://doi.org/10.1186/s12889-021-11111-1
+
+Babino, A., Magnasco, M.O. Masks and distancing during COVID-19: a causal framework for imputing value to public-health interventions. Sci Rep 11, 5183 (2021). https://doi.org/10.1038/s41598-021-84679-8
+
+Badu K, Oyebola K, Zahouli JZB, et al. SARS-CoV-2 Viral Shedding and Transmission Dynamics: Implications of WHO COVID-19 Discharge Guidelines. Front Med (Lausanne). 2021;8:648660. Published 2021 Jun 17. <doi:10.3389/fmed.2021.648660>
+
+Baicker, K., & Svoronos, T. (2022, March 3). Working paper testing the validity of the single ... - BFI. Retrieved March 5, 2022, from <https://bfi.uchicago.edu/wp-content/uploads/BFI_WP_201997.pdf>
+
+Bates, D., Mächler, M., Bolker, B., & Walker, S. (2015). Fitting Linear Mixed-Effects Models Using lme4. Journal of Statistical Software, 67(1), 1–48. https://doi.org/10.18637/jss.v067.i01
+
+Cevik, M., Tate, M., Lloyd, O., Maraolo, A. E., Schafers, J., & Ho, A. (2020, November 19). SARS-CoV-2, SARS-CoV, and MERS-CoV viral load dynamics, duration of viral shedding, and infectiousness: a systematic review and meta-analysis. Define_me. Retrieved March 4, 2022, from <https://www.thelancet.com/action/showPdf?pii=S2666-5247%2820%2930172-5>
+
+Chookajorn, T., Kochakarn, T., Wilasang, C. et al. Southeast Asia is an emerging hotspot for COVID-19. Nat Med 27, 1495--1496 (2021). <https://doi.org/10.1038/s41591-021-01471-x>
+
+Dinh-Toi Chu, Suong-Mai Vu Ngoc, Hue Vu Thi, Yen-Vy Nguyen Thi, Thuy-Tien Ho, Van-Thuan Hoang, Vijai Singh & Jaffar A. Al-Tawfiq (2022) COVID-19 in Southeast Asia: current status and perspectives, Bioengineered, 13:2, 3797-3809, DOI: 10.1080/21655979.2022.2031417
+
+Djalante, R., Nurhidayah, L., Van Minh, H., Phuong, N. T. N., Mahendradhata, Y., Trias, A., Lassa, J., & Miller, M. A. (2020, December). Covid-19 and ASEAN responses: Comparative policy analysis. Progress in disaster science. Retrieved March 4, 2022, from <https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7577870/>
+
+Douglass M, Miller MA. Disaster justice in Asia's urbanising Anthropocene. Environment and Planning E: Nature and Space. 2018;1(3):271-287. <doi:10.1177/2514848618797333>
+
+Espinosa, P., Quirola‐Amores, P., & Teran, E. (1AD, January 1). Application of a susceptible, infectious, and/or recovered (SIR) model to the COVID-19 pandemic in Ecuador. Frontiers. Retrieved March 4, 2022, from <https://www.frontiersin.org/articles/10.3389/fams.2020.571544/full#e1>
+
+Interrupted time series. (n.d.). Retrieved March 4, 2022, from <https://ds4ps.org/pe4ps-textbook/docs/p-020-time-series.html>
+
+Tetali, S. , Jammy, G. , Asirvatham, E. , Kumar, B. and Choudhury, L. (2021) An Interrupted Time Series Analysis of COVID-19 Positivity before, during and after Lockdown in Four States of India. Open Journal of Epidemiology, 11, 47-55. doi: 10.4236/ojepi.2021.111005.
+
+United Nations. (2019). World population prospects - population division. United Nations. Retrieved March 4, 2022, from <https://population.un.org/wpp/Download/Standard/Population/>
+
+# Appendix
+
+```{r, ref.label = knitr::all_labels(), echo  = T, eval = F}
+sessionInfo()
+```
